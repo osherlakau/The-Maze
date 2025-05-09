@@ -1,6 +1,8 @@
 import pygame
 import random
 import socket
+import threading
+import time
 
 IP = '127.0.0.1'
 port = 66
@@ -14,19 +16,16 @@ server_socket.listen(1)
 client_socket, client_address = server_socket.accept()
 print(f"Connection from {client_address} has been established!")
 
-# End connection
-server_socket.close()
-
 # Screen Set
 RES = 32
 #      (columns, rows)
-DIMS = (20,20)
+DIMS = (20, 20)
 SCREEN = (DIMS[0] * RES, DIMS[1] * RES)
 pygame.init()
 display = pygame.display.set_mode(SCREEN)
 pygame.display.set_caption("The Maze")
 
-#Class that creates walls and tiles
+# Class that creates walls and tiles
 class Tile:
     def __init__(self, c, r):
         self.c = c
@@ -40,12 +39,12 @@ class Tile:
         self.walls = [1, 1, 1, 1]
         self.visited = False
 
-#Function that draws tiles
-    def drawTile(self):
+    # Function that draws tiles
+    def draw_tile(self):
         pygame.draw.rect(display, self.color, self.rect)
 
-#Function that draws walls
-    def drawWalls(self):
+    # Function that draws walls
+    def draw_walls(self):
         # Right
         if bool(self.walls[0]):
             pygame.draw.line(display, "white", (self.x + RES, self.y), (self.x + RES, self.y + RES))
@@ -59,36 +58,43 @@ class Tile:
         if bool(self.walls[3]):
             pygame.draw.line(display, "white", (self.x, self.y), (self.x + RES, self.y))
 
-#Grid creation
+# Grid creation
 grid = []
 for r in range(DIMS[1]):
-#Tile row creation in grid
-    tileRow = []
+# Tile row creation in grid
+    tile_row = []
     for c in range(DIMS[0]):
         tile = Tile(c, r)
-        tileRow.append(tile)
-    grid.append(tileRow)
+        tile_row.append(tile)
+    grid.append(tile_row)
 
-#Current tile (starting point)
+# Current tile (starting point)
 ct = grid[0][0]
 ct.visited = True
 
-#Stack for back tracking
+# Stack for back tracking
 stack = [ct]
 
-#Draw grid
+# Draw grid
 def draw():
     display.fill("black")
-    for tileRow in grid:
-        for tile in tileRow:
-            tile.drawTile()
-    for tileRow in grid:
-        for tile in tileRow:
-            tile.drawWalls()
+    # Goal tile (end position)
+    gt = grid[DIMS[0] - 1][DIMS[1] - 1]
+    for row in grid:
+        for tile in row:
+            tile.color = "blue"
+            if tile == ct:
+                tile.color = "red"
+            if tile == gt:
+                continue
+            tile.draw_tile()
+    for row in grid:
+        for tile in row:
+            tile.draw_walls()
     pygame.display.flip()
 
-#Get optional tiles to visit
-def getNeigh(ct):
+# Get optional tiles to visit
+def get_neigh() -> list:
     neigh = []
     # Right
     if ct.c < DIMS[0] - 1 and not grid[ct.r][ct.c + 1].visited:
@@ -102,11 +108,11 @@ def getNeigh(ct):
     # Up
     if ct.r > 0 and not grid[ct.r - 1][ct.c].visited:
         neigh.append(grid[ct.r - 1][ct.c])
-
+    # Return list of unvisited neighbors
     return neigh
 
-#Remove wall between chosen tile and current tile based on their relative positions
-def tearDownWalls(ct, ch):
+# Remove wall between chosen tile and current tile based on their relative positions
+def tear_down_walls(ch):
     # Right
     if ch.c - ct.c > 0:
         ct.walls[0] = 0
@@ -124,39 +130,137 @@ def tearDownWalls(ct, ch):
         ct.walls[3] = 0
         ch.walls[1] = 0
 
-def update():
+# Draw maze
+def generate_maze():
     global ct
+    while True:
+        valid_n = get_neigh()
+        if len(valid_n) > 0:
+            chosen = random.choice(valid_n)
+            tear_down_walls(chosen)
+            chosen.visited = True
+            stack.append(ct)
+            ct = chosen
+        else:
+            if len(stack) > 0:
+                ct = stack.pop()
+            else:
+                break
 
-#Mark visited tiles
-    for tileRow in grid:
-        for tile in tileRow:
-            if tile.visited:
-                tile.color = "blue"
-            if tile == ct:
-                tile.color = "red"
+# Player move
+def move(client_message):
+    global ct
+    # Right
+    if client_message == "R":
+        if ct.walls[0] == 0:
+            ct = grid[ct.r][ct.c + 1]
+    # Down
+    elif client_message == "D":
+        if ct.walls[1] == 0:
+            ct = grid[ct.r + 1][ct.c]
+    # Left
+    elif client_message == "L":
+        if ct.walls[2] == 0:
+            ct = grid[ct.r][ct.c - 1]
+    # Up
+    elif client_message == "U":
+        if ct.walls[3] == 0:
+            ct = grid[ct.r - 1][ct.c]
 
-#Close pygame window
+# unexpected event
+shutdown_flag = threading.Event()
+
+# Player end game
+def player_leave(client_message):
+    # Exit
+    if client_message == "esc":
+        shutdown_flag.set()
+
+# Player play another game after solving
+def play_again(client_message):
+    global ct
+    # New maze
+    if ct == grid[DIMS[0] - 1][DIMS[1] - 1] and client_message == "enter":
+        reset_maze()
+    # Reset
+    elif ct != grid[DIMS[0] - 1][DIMS[1] - 1] and client_message == "enter":
+        ct = grid[0][0]
+
+# generate another maze from scratch after solving
+def reset_maze():
+    global grid, ct, stack
+    for row in grid:
+        for tile in row:
+            tile.visited = False
+            tile.walls = [1, 1, 1, 1]
+    ct = grid[0][0]
+    ct.visited = True
+    stack = [ct]
+    generate_maze()
+
+# Time stopper
+check = False
+start_times = []
+end_times = []
+time_play = []
+
+# Time stopper for each game
+def play_time(client_message):
+    global start_times, end_times, check
+    # Start
+    if ct != grid[0][0] and not check:
+        start = time.time()
+        start_times.append(start)
+        check = True
+    # New maze
+    if ct == grid[DIMS[0] - 1][DIMS[1] - 1] and client_message == "enter":
+        end = time.time()
+        end_times.append(end)
+        check = False
+        if len(end_times) > len(time_play):
+            duration = end_times[-1] - start_times[-1]
+            time_play.append(duration)
+    # Exit
+    if client_message == "esc":
+        end = time.time()
+        end_times.append(end)
+        check = False
+        if len(end_times) > len(time_play):
+            duration = end_times[-1] - start_times[-1]
+            time_play.append(duration)
+        # Print times after exit
+        for duration in time_play:
+            print(duration)
+
+# Listen for client messages
+def listen_for_client():
+    while True:
+        try:
+            client_message = client_socket.recv(1024).decode().strip()
+            move(client_message)
+            play_time(client_message)
+            player_leave(client_message)
+            play_again(client_message)
+        except ConnectionResetError:
+            shutdown_flag.set()
+            break
+        except Exception as e:
+            shutdown_flag.set()
+            break
+
+# Run maze generation and start listening thread
+generate_maze()
+threading.Thread(target=listen_for_client, daemon=True).start()
+
+# Game loop
+while True:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             exit()
-
-#Choosing random neighbor, moving to it, tearing down wall between tiles
-    validN = getNeigh(ct)
-    if len(validN) > 0:
-        chosen = random.choice(validN)
-        tearDownWalls(ct, chosen)
-        chosen.visited = True
-        ct = chosen
-        stack.append(chosen)
-
-#Returning to previous tile in stack (back tracking) (if no unvisited neighbors)
-    else:
-        if len(stack) > 0:
-            ct = stack.pop()
-
-#Run
-while True:
+    # exception in main thread
+    if shutdown_flag.is_set():
+        pygame.quit()
+        exit()
+    # Updating visual display of maze and player current position
     draw()
-    update()
-    pygame.time.delay(20)
