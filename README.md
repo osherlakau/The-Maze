@@ -1,4 +1,4 @@
-# The Maze
+# The-Maze
 General description:
 
 Create a server that prepares a random maze using two dimensional grid, the server chooses the first tile as a bot. The server connects to the client, and from there it waits for a move / direction from the client (right, down, left, up).
