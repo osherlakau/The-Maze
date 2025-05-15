@@ -5,7 +5,7 @@ import threading
 import time
 
 IP = '127.0.0.1'
-port = 66
+port = 5000
 
 # Build socket between server and client
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -14,7 +14,7 @@ server_socket.listen(1)
 
 # Approve connection
 client_socket, client_address = server_socket.accept()
-print(f"Connection from {client_address} has been established!")
+print(f"Connection from {client_address} has been established!\n")
 
 # Screen Set
 RES = 32
@@ -38,6 +38,7 @@ class Tile:
         #            [Right, Down, Left, Up]
         self.walls = [1, 1, 1, 1]
         self.visited = False
+        self.moved = False
 
     # Function that draws tiles
     def draw_tile(self):
@@ -84,7 +85,9 @@ def draw():
         for tile in row:
             tile.color = "blue"
             if tile == ct:
-                tile.color = "red"
+                tile.color = "orange"
+            if tile.moved:
+                tile.color = "purple"
             if tile == gt:
                 continue
             tile.draw_tile()
@@ -153,18 +156,38 @@ def move(client_message):
     # Right
     if client_message == "R":
         if ct.walls[0] == 0:
+            if not grid[ct.r][ct.c + 1].moved:
+                ct.moved = True
+            else:
+                ct.moved = False
+                grid[ct.r][ct.c + 1].moved = False
             ct = grid[ct.r][ct.c + 1]
     # Down
     elif client_message == "D":
         if ct.walls[1] == 0:
+            if not grid[ct.r + 1][ct.c].moved:
+                ct.moved = True
+            else:
+                ct.moved = False
+                grid[ct.r + 1][ct.c].moved = False
             ct = grid[ct.r + 1][ct.c]
     # Left
     elif client_message == "L":
         if ct.walls[2] == 0:
+            if not grid[ct.r][ct.c - 1].moved:
+                ct.moved = True
+            else:
+                ct.moved = False
+                grid[ct.r][ct.c - 1].moved = False
             ct = grid[ct.r][ct.c - 1]
     # Up
     elif client_message == "U":
         if ct.walls[3] == 0:
+            if not grid[ct.r - 1][ct.c].moved:
+                ct.moved = True
+            else:
+                ct.moved = False
+                grid[ct.r - 1][ct.c].moved = False
             ct = grid[ct.r - 1][ct.c]
 
 # unexpected event
@@ -180,11 +203,14 @@ def player_leave(client_message):
 def play_again(client_message):
     global ct
     # New maze
-    if ct == grid[DIMS[0] - 1][DIMS[1] - 1] and client_message == "enter":
+    if ct == grid[DIMS[0] - 1][DIMS[1] - 1]:
         reset_maze()
-    # Reset
+    # Reset game
     elif ct != grid[DIMS[0] - 1][DIMS[1] - 1] and client_message == "enter":
-        ct = grid[0][0]
+        for row in grid:
+            for tile in row:
+                tile.moved = False
+            ct = grid[0][0]
 
 # generate another maze from scratch after solving
 def reset_maze():
@@ -192,6 +218,7 @@ def reset_maze():
     for row in grid:
         for tile in row:
             tile.visited = False
+            tile.moved = False
             tile.walls = [1, 1, 1, 1]
     ct = grid[0][0]
     ct.visited = True
@@ -205,7 +232,7 @@ end_times = []
 time_play = []
 
 # Time stopper for each game
-def play_time(client_message):
+def solution_time(client_message):
     global start_times, end_times, check
     # Start
     if ct != grid[0][0] and not check:
@@ -213,24 +240,24 @@ def play_time(client_message):
         start_times.append(start)
         check = True
     # New maze
-    if ct == grid[DIMS[0] - 1][DIMS[1] - 1] and client_message == "enter":
+    if ct == grid[DIMS[0] - 1][DIMS[1] - 1] and check:
         end = time.time()
         end_times.append(end)
         check = False
-        if len(end_times) > len(time_play):
+        if len(end_times) > len(time_play) and len(end_times) == len(start_times):
             duration = end_times[-1] - start_times[-1]
             time_play.append(duration)
     # Exit
     if client_message == "esc":
-        end = time.time()
-        end_times.append(end)
-        check = False
-        if len(end_times) > len(time_play):
-            duration = end_times[-1] - start_times[-1]
-            time_play.append(duration)
-        # Print times after exit
+        # Print solution time of maze after exit
         for duration in time_play:
-            print(duration)
+            print(f"Maze number {time_play.index(duration) + 1} solution time: {duration}")
+        sum = 0
+        count = 0
+        for duration in time_play:
+            sum += duration
+            count += 1
+        print(f"Average solution time for all mazes: {sum / count}")
 
 # Listen for client messages
 def listen_for_client():
@@ -238,7 +265,7 @@ def listen_for_client():
         try:
             client_message = client_socket.recv(1024).decode().strip()
             move(client_message)
-            play_time(client_message)
+            solution_time(client_message)
             player_leave(client_message)
             play_again(client_message)
         except ConnectionResetError:
