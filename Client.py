@@ -1,5 +1,6 @@
 import socket
 import keyboard
+import json
 
 IP = '127.0.0.1'
 port = 5000
@@ -8,24 +9,28 @@ port = 5000
 client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client_socket.connect((IP, port))
 
+def send_command(command):
+    message = json.dumps({"command": command}) + "\n"
+    client_socket.send(message.encode())
+
 # All 6 functions send message
 def on_right(event):
-    client_socket.send("R".encode())
+    send_command("R")
 
 def on_down(event):
-    client_socket.send("D".encode())
+    send_command("D")
 
 def on_left(event):
-    client_socket.send("L".encode())
+    send_command("L")
 
 def on_up(event):
-    client_socket.send("U".encode())
+    send_command("U")
 
 def exit(event):
-    client_socket.send("esc".encode())
+    send_command("esc")
 
 def reset(event):
-    client_socket.send("enter".encode())
+    send_command("enter")
 
 # Read key and send (arrows)
 keyboard.on_press_key("right", on_right)

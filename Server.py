@@ -3,6 +3,7 @@ import random
 import socket
 import threading
 import time
+import json
 
 IP = '127.0.0.1'
 port = 5000
@@ -151,10 +152,10 @@ def generate_maze():
                 break
 
 # Player move
-def move(client_message):
+def move(command):
     global ct
     # Right
-    if client_message == "R":
+    if command == "R":
         if ct.walls[0] == 0:
             if not grid[ct.r][ct.c + 1].moved:
                 ct.moved = True
@@ -163,7 +164,7 @@ def move(client_message):
                 grid[ct.r][ct.c + 1].moved = False
             ct = grid[ct.r][ct.c + 1]
     # Down
-    elif client_message == "D":
+    elif command == "D":
         if ct.walls[1] == 0:
             if not grid[ct.r + 1][ct.c].moved:
                 ct.moved = True
@@ -172,7 +173,7 @@ def move(client_message):
                 grid[ct.r + 1][ct.c].moved = False
             ct = grid[ct.r + 1][ct.c]
     # Left
-    elif client_message == "L":
+    elif command == "L":
         if ct.walls[2] == 0:
             if not grid[ct.r][ct.c - 1].moved:
                 ct.moved = True
@@ -181,7 +182,7 @@ def move(client_message):
                 grid[ct.r][ct.c - 1].moved = False
             ct = grid[ct.r][ct.c - 1]
     # Up
-    elif client_message == "U":
+    elif command == "U":
         if ct.walls[3] == 0:
             if not grid[ct.r - 1][ct.c].moved:
                 ct.moved = True
@@ -194,19 +195,19 @@ def move(client_message):
 shutdown_flag = threading.Event()
 
 # Player end game
-def player_leave(client_message):
+def player_leave(command):
     # Exit
-    if client_message == "esc":
+    if command == "esc":
         shutdown_flag.set()
 
 # Player play another game after solving
-def play_again(client_message):
+def play_again(command):
     global ct
     # New maze
     if ct == grid[DIMS[0] - 1][DIMS[1] - 1]:
         reset_maze()
     # Reset game
-    elif ct != grid[DIMS[0] - 1][DIMS[1] - 1] and client_message == "enter":
+    elif ct != grid[DIMS[0] - 1][DIMS[1] - 1] and command == "enter":
         for row in grid:
             for tile in row:
                 tile.moved = False
@@ -232,7 +233,7 @@ end_times = []
 time_play = []
 
 # Time stopper for each game
-def solution_time(client_message):
+def solution_time(command):
     global start_times, end_times, check
     # Start
     if ct != grid[0][0] and not check:
@@ -248,7 +249,7 @@ def solution_time(client_message):
             duration = end_times[-1] - start_times[-1]
             time_play.append(duration)
     # Exit
-    if client_message == "esc":
+    if command == "esc":
         # Print solution time of maze after exit
         for duration in time_play:
             print(f"Maze number {time_play.index(duration) + 1} solution time: {duration}")
@@ -257,23 +258,45 @@ def solution_time(client_message):
         for duration in time_play:
             sum += duration
             count += 1
-        print(f"Average solution time for all mazes: {sum / count}")
+        if count > 1:
+            print(f"Average solution time for maze: {sum / count}")
+
+# Allowed commands for client messages
+allowed_commands = {"R", "D", "L", "U", "esc", "enter"}
 
 # Listen for client messages
 def listen_for_client():
+    buffer = ""
     while True:
         try:
-            client_message = client_socket.recv(1024).decode().strip()
-            move(client_message)
-            solution_time(client_message)
-            player_leave(client_message)
-            play_again(client_message)
+            data = client_socket.recv(1024).decode()
+            if not data:
+                break
+            buffer += data
+            # Take necessary text from message
+            while "\n" in buffer:
+                # Keep only first json message (before split)
+                line, buffer = buffer.split("\n", 1)
+                try:
+                    message = json.loads(line)
+                    command = message["command"]
+                    if command in allowed_commands:
+                        move(command)
+                        solution_time(command)
+                        player_leave(command)
+                        play_again(command)
+                    else:
+                        print("Invalid command:", command)
+                except json.JSONDecodeError:
+                    print("Invalid JSON received.")
         except ConnectionResetError:
             shutdown_flag.set()
             break
         except Exception as e:
+            print("Unexpected error:", e)
             shutdown_flag.set()
             break
+
 
 # Run maze generation and start listening thread
 generate_maze()
